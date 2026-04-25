@@ -6,22 +6,72 @@ An AI-native data analytics layer built on the [Model Context Protocol](https://
 
 ---
 
-## How it works
+## Architecture
 
-```
-You ──▶ Claude / Ollama
-              │
-              ▼
-        MCP Server (server.py)
-              │
-        ┌─────┴──────┐
-        │             │
-  Semantic layer   Snowflake
-  (schemas/*.yaml) connector
-        │
-  Canonical metrics, join paths,
-  Snowflake optimisation rules
-  injected into every query
+```mermaid
+flowchart TB
+    subgraph clients["AI Clients"]
+        CC["☁️ Claude Code\n(claude.ai/code)"]
+        OLL["🦙 Ollama\nllama3.2 · mistral"]
+    end
+
+    subgraph transport["Transport Layer"]
+        STDIO["📥 stdio\nLocal · Docker"]
+        SSE["🌐 HTTP + SSE\nKubernetes"]
+    end
+
+    subgraph mcp["SnowMCP — server.py"]
+        direction TB
+
+        subgraph sl["Semantic Layer  (semantic.py + schemas/)"]
+            YAML["📄 Entity YAMLs\nOrders · Customers · Lineitems\nMetrics · Attributes · Join paths"]
+            RULES["⚡ Snowflake SQL Rules\nQUALIFY · IFF · APPROX_COUNT_DISTINCT\nNULLIF · CTE-first · Filter pushdown"]
+        end
+
+        subgraph tools["11 MCP Tools"]
+            T_SEM["🔍 Semantic\nget_semantic_context\nlookup_metric · validate_sql"]
+            T_SF["❄️ Snowflake\nsnowflake_query\nsnowflake_list_tables\nsnowflake_describe_table"]
+            T_CSV["📊 Local CSV\nload_dataset · run_sql\nget_schema · get_statistics\nlist_loaded_datasets"]
+        end
+
+        sl -- "grounds every query" --> tools
+    end
+
+    subgraph data["Data Sources"]
+        SF[("❄️ Snowflake\nSEMANTIC_LAYER_DEV\nORDERS · CUSTOMERS · LINEITEM")]
+        DDB[("🦆 DuckDB\nLocal CSV files\nsales.csv · employees.csv")]
+    end
+
+    subgraph cicd["CI/CD  (GitHub Actions)"]
+        CI["✅ ci.yml\nruff lint · pytest"]
+        REL["🚀 release.yml\nDocker build + push"]
+        GHCR["📦 ghcr.io\nContainer Registry"]
+        K8S["☸️ Kubernetes\nDeployment · Service · Ingress"]
+    end
+
+    CC -- "MCP protocol\n(stdio)" --> STDIO
+    OLL -- "stdio" --> STDIO
+    OLL -- "HTTP" --> SSE
+    STDIO --> mcp
+    SSE --> mcp
+
+    T_SF -- "Snowflake connector" --> SF
+    T_CSV -- "pandas + DuckDB" --> DDB
+
+    CI --> REL --> GHCR --> K8S
+    K8S -- "SSE transport" --> SSE
+
+    classDef clientBox fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef serverBox fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef dataBox fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef cicdBox fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    classDef transportBox fill:#f1f5f9,stroke:#64748b,color:#1e293b
+
+    class CC,OLL clientBox
+    class YAML,RULES,T_SEM,T_SF,T_CSV serverBox
+    class SF,DDB dataBox
+    class CI,REL,GHCR,K8S cicdBox
+    class STDIO,SSE transportBox
 ```
 
 On startup the server loads entity YAML schemas (`schemas/`), which define tables, canonical metric formulas, join relationships, and Snowflake-specific SQL rules. Every query Claude or Ollama generates is grounded in this model — the same way Cortex Analyst uses its semantic model.
