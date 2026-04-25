@@ -13,7 +13,6 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Data models (mirrors semantic-layer/backend/core/schema/models.py)
 # ---------------------------------------------------------------------------

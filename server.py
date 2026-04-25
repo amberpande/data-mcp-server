@@ -9,18 +9,19 @@ Teaches MCP concepts through three core primitives:
 
 import json
 import os
-import duckdb
-import pandas as pd
 from pathlib import Path
-from dotenv import load_dotenv
-from mcp.server import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
+
+import duckdb
 import mcp.server.stdio
 import mcp.types as types
+import pandas as pd
+from dotenv import load_dotenv
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 
 load_dotenv()
 
-from semantic import load_entities, lookup_metric, all_metrics, build_semantic_context, build_system_prompt  # noqa: E402
+from semantic import all_metrics, build_semantic_context, load_entities, lookup_metric  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -456,9 +457,9 @@ async def main():
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
 
     if transport == "sse":
+        import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.responses import PlainTextResponse
-        import uvicorn
 
         sse = SseServerTransport("/messages/")
 
