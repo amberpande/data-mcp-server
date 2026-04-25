@@ -1,0 +1,6 @@
+services:
+  mcp-server:
+    build: .
+    stdin_open: true
+    tty: false
+    env_file: .env

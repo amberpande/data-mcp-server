@@ -1,0 +1,17 @@
+date,region,product,quantity,unit_price,total
+2024-01-05,North,Widget A,120,15.00,1800.00
+2024-01-12,South,Widget B,85,22.50,1912.50
+2024-01-19,East,Widget A,200,15.00,3000.00
+2024-02-03,West,Gadget X,45,89.99,4049.55
+2024-02-10,North,Widget B,130,22.50,2925.00
+2024-02-18,South,Gadget X,60,89.99,5399.40
+2024-03-02,East,Widget A,175,15.00,2625.00
+2024-03-15,West,Widget B,95,22.50,2137.50
+2024-03-22,North,Gadget X,30,89.99,2699.70
+2024-04-01,South,Widget A,220,15.00,3300.00
+2024-04-11,East,Gadget X,55,89.99,4949.45
+2024-04-25,West,Widget A,140,15.00,2100.00
+2024-05-07,North,Widget B,165,22.50,3712.50
+2024-05-20,South,Gadget X,40,89.99,3599.60
+2024-06-03,East,Widget B,110,22.50,2475.00
+2024-06-18,West,Gadget X,70,89.99,6299.30

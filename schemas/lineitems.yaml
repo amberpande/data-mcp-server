@@ -1,0 +1,45 @@
+type: entity
+name: lineitems
+display_name: Line Items
+description: Individual order line items
+source: SEMANTIC_LAYER_DEV.PUBLIC.LINEITEM
+keys:
+  - l_orderkey
+  - l_linenumber
+relations:
+  - target_entity: orders
+    rel_type: many-to-one
+    rel_join_type: left
+    cross_filtering: both
+    join_on:
+      - source_field: l_orderkey
+        target_field: o_orderkey
+attributes:
+  - name: quantity
+    source_field: l_quantity
+  - name: extended_price
+    source_field: l_extendedprice
+  - name: discount
+    source_field: l_discount
+  - name: ship_date
+    source_field: l_shipdate
+  - name: return_flag
+    source_field: l_returnflag
+metrics:
+  - name: line_item_count
+    display_name: Line Item Count
+    aggregation: COUNT
+    source_field: l_linenumber
+    granularity: lineitems
+    default: 0
+  - name: total_extended_price
+    display_name: Total Extended Price
+    aggregation: SUM
+    source_field: l_extendedprice
+    granularity: lineitems
+    default: 0
+  - name: avg_discount
+    display_name: Avg Discount
+    aggregation: AVG
+    source_field: l_discount
+    granularity: lineitems

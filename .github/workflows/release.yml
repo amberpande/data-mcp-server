@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ env.IMAGE }}:${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    # Requires these GitHub Secrets set on the repo:
+    #   KUBE_CONFIG          — base64-encoded kubeconfig for the cluster
+    #   SNOWFLAKE_ACCOUNT    — Snowflake account identifier
+    #   SNOWFLAKE_USER       — Snowflake username
+    #   SNOWFLAKE_PASSWORD   — Snowflake password
+    #   SNOWFLAKE_WAREHOUSE  — Warehouse name
+    #   SNOWFLAKE_DATABASE   — Database name
+    #   SNOWFLAKE_SCHEMA     — Schema name
+    #   SNOWFLAKE_ROLE       — Snowflake role
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+
+      - name: Create / update Snowflake secret
+        run: |
+          kubectl create secret generic snowflake-credentials \
+            --from-literal=account="${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --from-literal=user="${{ secrets.SNOWFLAKE_USER }}" \
+            --from-literal=password="${{ secrets.SNOWFLAKE_PASSWORD }}" \
+            --from-literal=warehouse="${{ secrets.SNOWFLAKE_WAREHOUSE }}" \
+            --from-literal=database="${{ secrets.SNOWFLAKE_DATABASE }}" \
+            --from-literal=schema="${{ secrets.SNOWFLAKE_SCHEMA }}" \
+            --from-literal=role="${{ secrets.SNOWFLAKE_ROLE }}" \
+            --save-config --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to Kubernetes
+        run: |
+          # Pin image to the exact SHA built in this run
+          sed "s|ghcr.io/GITHUB_REPOSITORY:latest|${{ env.IMAGE }}:${{ github.sha }}|g" \
+            k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/service.yaml
+          kubectl rollout status deployment/data-mcp-server --timeout=120s

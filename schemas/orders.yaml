@@ -1,0 +1,42 @@
+type: entity
+name: orders
+display_name: Orders
+description: Customer orders
+source: SEMANTIC_LAYER_DEV.PUBLIC.ORDERS
+keys:
+  - o_orderkey
+relations:
+  - target_entity: customers
+    rel_type: many-to-one
+    rel_join_type: left
+    cross_filtering: both
+    join_on:
+      - source_field: o_custkey
+        target_field: c_custkey
+attributes:
+  - name: order_date
+    source_field: o_orderdate
+  - name: status
+    source_field: o_orderstatus
+  - name: total_price
+    source_field: o_totalprice
+  - name: order_priority
+    source_field: o_orderpriority
+metrics:
+  - name: order_count
+    display_name: Order Count
+    aggregation: COUNT
+    source_field: o_orderkey
+    granularity: orders
+    default: 0
+  - name: total_revenue
+    display_name: Total Revenue
+    aggregation: SUM
+    source_field: o_totalprice
+    granularity: orders
+    default: 0
+  - name: avg_order_value
+    display_name: Avg Order Value
+    aggregation: AVG
+    source_field: o_totalprice
+    granularity: orders

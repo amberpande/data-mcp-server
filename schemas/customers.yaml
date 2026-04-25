@@ -1,0 +1,28 @@
+type: entity
+name: customers
+display_name: Customers
+description: Customer master data
+source: SEMANTIC_LAYER_DEV.PUBLIC.CUSTOMERS
+keys:
+  - c_custkey
+attributes:
+  - name: name
+    source_field: c_name
+  - name: segment
+    source_field: c_mktsegment
+  - name: nation_key
+    source_field: c_nationkey
+  - name: account_balance
+    source_field: c_acctbal
+metrics:
+  - name: customer_count
+    display_name: Customer Count
+    aggregation: COUNT
+    source_field: c_custkey
+    granularity: customers
+    default: 0
+  - name: avg_account_balance
+    display_name: Avg Account Balance
+    aggregation: AVG
+    source_field: c_acctbal
+    granularity: customers

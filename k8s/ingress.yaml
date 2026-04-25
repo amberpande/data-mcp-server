@@ -1,0 +1,21 @@
+# Optional — uncomment and set host if you want external access via a domain.
+# Requires an Ingress controller (e.g. nginx-ingress) installed in the cluster.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: data-mcp-server
+#   annotations:
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+# spec:
+#   rules:
+#     - host: mcp.yourdomain.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: data-mcp-server
+#                 port:
+#                   number: 80

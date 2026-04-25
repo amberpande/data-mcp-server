@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-mcp-server
+  labels:
+    app: data-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-mcp-server
+  template:
+    metadata:
+      labels:
+        app: data-mcp-server
+    spec:
+      containers:
+        - name: data-mcp-server
+          image: ghcr.io/GITHUB_REPOSITORY:latest  # replaced by release workflow
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MCP_TRANSPORT
+              value: "sse"
+            - name: PORT
+              value: "8000"
+            - name: SNOWFLAKE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: account
+            - name: SNOWFLAKE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: user
+            - name: SNOWFLAKE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: password
+            - name: SNOWFLAKE_WAREHOUSE
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: warehouse
+            - name: SNOWFLAKE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: database
+            - name: SNOWFLAKE_SCHEMA
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: schema
+            - name: SNOWFLAKE_ROLE
+              valueFrom:
+                secretKeyRef:
+                  name: snowflake-credentials
+                  key: role
+          readinessProbe:
+            httpGet:
+              path: /sse
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

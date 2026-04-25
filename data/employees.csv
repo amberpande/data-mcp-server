@@ -1,0 +1,13 @@
+employee_id,name,department,role,salary,hire_date,is_active
+E001,Alice Chen,Engineering,Senior Engineer,115000,2020-03-15,true
+E002,Bob Kumar,Engineering,Junior Engineer,72000,2023-01-10,true
+E003,Carol Smith,Data,Data Engineer,98000,2021-06-01,true
+E004,Dan Lee,Data,Data Analyst,82000,2022-09-20,true
+E005,Eve Martinez,Sales,Sales Manager,105000,2019-11-05,true
+E006,Frank Wilson,Sales,Sales Rep,65000,2023-04-01,true
+E007,Grace Liu,Engineering,Staff Engineer,145000,2018-07-22,true
+E008,Hank Brown,Data,ML Engineer,125000,2020-12-14,true
+E009,Iris Park,Sales,Sales Rep,65000,2022-03-30,false
+E010,Jake Taylor,Engineering,Junior Engineer,70000,2024-02-01,true
+E011,Karen White,Data,Data Analyst,85000,2021-10-18,true
+E012,Leo Patel,Engineering,Senior Engineer,118000,2019-05-07,true
