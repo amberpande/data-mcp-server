@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 pyyaml>=6.0.0
 pydantic>=2.0.0
 litellm>=1.40.0
+ollama>=0.3.0
 starlette>=0.40.0
 uvicorn>=0.30.0
 ruff>=0.4.0

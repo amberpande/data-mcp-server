@@ -1,5 +1,5 @@
 """
-LiteLLM ↔ MCP bridge — chat with your data using any LLM provider.
+LiteLLM / Ollama ↔ MCP bridge — chat with your data using any LLM provider.
 
 Usage:
     python ollama_client.py                                        # stdio, ollama/llama3.2
@@ -11,6 +11,7 @@ Usage:
 
 Provider API keys via env vars:
     OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, AZURE_API_KEY, ...
+    Ollama models (ollama/*) use the native Ollama SDK — no API key needed.
 """
 
 import argparse
@@ -28,53 +29,7 @@ SERVER_SCRIPT = Path(__file__).parent / "server.py"
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
 
-def _normalize_tool_calls(msg) -> list[dict] | None:
-    """
-    Return a normalised list of {id, name, arguments(dict)} or None.
-
-    LiteLLM populates msg.tool_calls for most providers. Some Ollama models
-    instead embed the tool call as JSON text in msg.content — this fallback
-    handles that case so both paths go through the same execution loop.
-    """
-    if msg.tool_calls:
-        result = []
-        for tc in msg.tool_calls:
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = json.loads(args or "{}")
-            result.append({
-                "id": tc.id or f"call_{tc.function.name}",
-                "name": tc.function.name,
-                "arguments": args,
-            })
-        return result or None
-
-    # Fallback: tool call(s) embedded as JSON in content
-    content = (msg.content or "").strip()
-    if not (content.startswith("{") or content.startswith("[")):
-        return None
-    try:
-        parsed = json.loads(content)
-        items = parsed if isinstance(parsed, list) else [parsed]
-        if not items or "function" not in items[0]:
-            return None
-        result = []
-        for item in items:
-            fn = item["function"]
-            args = fn.get("arguments", {})
-            if isinstance(args, str):
-                args = json.loads(args or "{}")
-            result.append({
-                "id": item.get("id") or f"call_{fn['name']}",
-                "name": fn["name"],
-                "arguments": args,
-            })
-        return result or None
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
-def _to_litellm_tool(tool, model: str = "") -> dict:
+def _to_tool_schema(tool, model: str = "") -> dict:
     schema = dict(tool.inputSchema)
     if not model.startswith("gemini/"):
         schema.setdefault("additionalProperties", False)
@@ -89,14 +44,20 @@ def _to_litellm_tool(tool, model: str = "") -> dict:
 
 
 def _build_system_prompt_from_context(ctx: dict) -> str:
-    """Convert get_semantic_context JSON into a grounding system prompt."""
     from semantic import build_system_prompt, load_entities
     return build_system_prompt(load_entities(SCHEMAS_DIR))
 
 
-async def chat_loop(session: ClientSession, model: str) -> None:
+# ── Ollama-native agentic loop ─────────────────────────────────────────────────
+
+async def _ollama_chat_loop(session: ClientSession, model: str) -> None:
+    """Use the native Ollama SDK — preserves exact original behaviour."""
+    import ollama
+
+    ollama_model = model[len("ollama/"):]  # strip prefix for SDK call
+
     tools_resp = await session.list_tools()
-    tools = [_to_litellm_tool(t, model) for t in tools_resp.tools]
+    tools = [_to_tool_schema(t) for t in tools_resp.tools]
 
     ctx_result = await session.call_tool("get_semantic_context", {})
     ctx = json.loads(ctx_result.content[0].text)
@@ -121,7 +82,103 @@ async def chat_loop(session: ClientSession, model: str) -> None:
 
         history.append({"role": "user", "content": user_input})
 
-        # Agentic loop — keep invoking tools until the model gives a final answer
+        while True:
+            response = ollama.chat(model=ollama_model, messages=history, tools=tools)
+            msg = response.message
+            history.append(msg)
+
+            if not msg.tool_calls:
+                print(f"\nAssistant: {msg.content}\n")
+                break
+
+            for call in msg.tool_calls:
+                name = call.function.name
+                args = call.function.arguments or {}
+                print(f"  → {name}({json.dumps(args)})")
+
+                result = await session.call_tool(name, args)
+                content = result.content[0].text if result.content else ""
+                history.append({"role": "tool", "content": content})
+
+
+# ── LiteLLM agentic loop (cloud providers) ────────────────────────────────────
+
+def _normalize_tool_calls(msg) -> list[dict] | None:
+    """
+    Normalize tool calls to {id, name, arguments(dict)}.
+    Handles msg.tool_calls (standard) and content-embedded JSON (some models).
+    """
+    if msg.tool_calls:
+        result = []
+        for tc in msg.tool_calls:
+            args = tc.function.arguments
+            if isinstance(args, str):
+                args = json.loads(args or "{}")
+            result.append({
+                "id": tc.id or f"call_{tc.function.name}",
+                "name": tc.function.name,
+                "arguments": args,
+            })
+        return result or None
+
+    # Fallback: some models embed tool calls as JSON in content
+    content = (msg.content or "").strip()
+    if not (content.startswith("{") or content.startswith("[")):
+        return None
+    try:
+        parsed = json.loads(content)
+        # Handle {"toolCalls": [...]} wrapper
+        if isinstance(parsed, dict) and "toolCalls" in parsed:
+            items = parsed["toolCalls"]
+        elif isinstance(parsed, list):
+            items = parsed
+        else:
+            items = [parsed]
+        if not items or "function" not in items[0]:
+            return None
+        result = []
+        for item in items:
+            fn = item["function"]
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                args = json.loads(args or "{}")
+            result.append({
+                "id": item.get("id") or f"call_{fn['name']}",
+                "name": fn["name"],
+                "arguments": args,
+            })
+        return result or None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+async def _litellm_chat_loop(session: ClientSession, model: str) -> None:
+    tools_resp = await session.list_tools()
+    tools = [_to_tool_schema(t, model) for t in tools_resp.tools]
+
+    ctx_result = await session.call_tool("get_semantic_context", {})
+    ctx = json.loads(ctx_result.content[0].text)
+    system_prompt = _build_system_prompt_from_context(ctx)
+
+    print(f"Model  : {model}")
+    print(f"Tables : {', '.join(e['name'] for e in ctx.get('entities', []))}")
+    print(f"Tools  : {', '.join(t['function']['name'] for t in tools)}")
+    print("Type 'quit' to exit.\n")
+
+    history = [{"role": "system", "content": system_prompt}]
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not user_input or user_input.lower() in ("quit", "exit"):
+            break
+
+        history.append({"role": "user", "content": user_input})
+
         while True:
             response = await litellm.acompletion(
                 model=model, messages=history, tools=tools
@@ -142,7 +199,6 @@ async def chat_loop(session: ClientSession, model: str) -> None:
                     }
                     for tc in tool_calls
                 ]
-                # Don't echo the raw tool-call JSON as if it were a final answer
                 assistant_entry["content"] = ""
             history.append(assistant_entry)
 
@@ -163,6 +219,15 @@ async def chat_loop(session: ClientSession, model: str) -> None:
                     "tool_call_id": tc["id"],
                     "content": content,
                 })
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+async def chat_loop(session: ClientSession, model: str) -> None:
+    if model.startswith("ollama/"):
+        await _ollama_chat_loop(session, model)
+    else:
+        await _litellm_chat_loop(session, model)
 
 
 async def main(model: str, sse_url: str | None) -> None:
@@ -190,8 +255,8 @@ if __name__ == "__main__":
         "--model",
         default=os.environ.get("LLM_MODEL", "ollama/llama3.2"),
         help=(
-            "LiteLLM model string. Examples:\n"
-            "  ollama/llama3.2              (default, local Ollama)\n"
+            "Model string. Examples:\n"
+            "  ollama/llama3.2              (default, local Ollama — native SDK)\n"
             "  gpt-4o                       (OpenAI)\n"
             "  claude-3-5-sonnet-20241022   (Anthropic)\n"
             "  gemini/gemini-1.5-pro        (Google)\n"
