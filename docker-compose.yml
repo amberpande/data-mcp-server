@@ -4,3 +4,7 @@ services:
     stdin_open: true
     tty: false
     env_file: .env
+    # To use a cloud LLM provider with the chat client, add:
+    # environment:
+    #   - LLM_MODEL=gpt-4o
+    #   - OPENAI_API_KEY=${OPENAI_API_KEY}
