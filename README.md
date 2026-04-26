@@ -1,8 +1,8 @@
 # SnowMCP
 
-An AI-native data analytics layer built on the [Model Context Protocol](https://modelcontextprotocol.io). Connects Claude and Ollama to Snowflake and local CSV datasets through a semantic layer — delivering consistent, Snowflake-optimised SQL without hallucinated column names or inconsistent metric definitions.
+An AI-native data analytics layer built on the [Model Context Protocol](https://modelcontextprotocol.io). Connects Claude and any LLM provider to Snowflake and local CSV datasets through a semantic layer — delivering consistent, Snowflake-optimised SQL without hallucinated column names or inconsistent metric definitions.
 
-**What makes it different from Snowflake Cortex Analyst:** model flexibility (Claude or any Ollama model), local CSV querying alongside Snowflake, and full ownership of the semantic model and deployment.
+**What makes it different from Snowflake Cortex Analyst:** model flexibility (Claude, OpenAI, Anthropic, Gemini, Ollama, or any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)), local CSV querying alongside Snowflake, and full ownership of the semantic model and deployment.
 
 ---
 
@@ -12,7 +12,7 @@ An AI-native data analytics layer built on the [Model Context Protocol](https://
 flowchart TB
     subgraph clients["AI Clients"]
         CC["☁️ Claude Code\n(claude.ai/code)"]
-        OLL["🦙 Ollama\nllama3.2 · mistral"]
+        OLL["🤖 LiteLLM Client\nOllama · OpenAI · Anthropic\nGemini · Azure · …"]
     end
 
     subgraph transport["Transport Layer"]
@@ -50,8 +50,8 @@ flowchart TB
     end
 
     CC -- "MCP protocol\n(stdio)" --> STDIO
-    OLL -- "stdio" --> STDIO
-    OLL -- "HTTP" --> SSE
+    OLL -- "stdio\n(ollama_client.py)" --> STDIO
+    OLL -- "HTTP\n(--sse)" --> SSE
     STDIO --> mcp
     SSE --> mcp
 
@@ -74,7 +74,7 @@ flowchart TB
     class STDIO,SSE transportBox
 ```
 
-On startup the server loads entity YAML schemas (`schemas/`), which define tables, canonical metric formulas, join relationships, and Snowflake-specific SQL rules. Every query Claude or Ollama generates is grounded in this model — the same way Cortex Analyst uses its semantic model.
+On startup the server loads entity YAML schemas (`schemas/`), which define tables, canonical metric formulas, join relationships, and Snowflake-specific SQL rules. Every query any LLM generates is grounded in this model — the same way Cortex Analyst uses its semantic model.
 
 ---
 
@@ -84,7 +84,7 @@ On startup the server loads entity YAML schemas (`schemas/`), which define table
 |-------------|-------|
 | Python 3.12+ | `python --version` |
 | Snowflake account | Credentials in `.env` (see below) |
-| Ollama | Optional — for local LLM chat |
+| LLM provider | Optional — Ollama (local) or any cloud provider for the chat client |
 | Docker | Optional — for containerised dev/prod |
 | kubectl | Optional — for Kubernetes deployment |
 
@@ -107,7 +107,11 @@ cp .env.example .env   # then fill in your credentials
 | `SNOWFLAKE_ROLE` | Snowflake role (e.g. `ACCOUNTADMIN`) |
 | `MCP_TRANSPORT` | `stdio` (default) or `sse` (Kubernetes) |
 | `PORT` | HTTP port when `MCP_TRANSPORT=sse` (default `8000`) |
-| `OLLAMA_MODEL` | Default Ollama model (default `llama3.2`) |
+| `LLM_MODEL` | LiteLLM model string (default `ollama/llama3.2`) |
+| `OPENAI_API_KEY` | Required for `gpt-4o`, `gpt-4-turbo`, etc. |
+| `ANTHROPIC_API_KEY` | Required for `claude-3-5-sonnet-20241022`, etc. |
+| `GOOGLE_API_KEY` | Required for `gemini/gemini-1.5-pro`, etc. |
+| `AZURE_API_KEY` / `AZURE_API_BASE` | Required for `azure/<deployment>` |
 
 ---
 
@@ -182,7 +186,7 @@ pip install -r requirements.txt
 python server.py          # stdio mode — used by Claude Code
 ```
 
-SSE mode (HTTP, needed for Ollama `--sse` or Kubernetes):
+SSE mode (HTTP, needed for `ollama_client.py --sse` or Kubernetes):
 
 ```bash
 MCP_TRANSPORT=sse python server.py
@@ -226,24 +230,35 @@ To use the Docker image with Claude Code, update the MCP entry in `~/.claude.jso
 
 ---
 
-## Chat via Ollama
+## Chat via LiteLLM
 
-Run a local LLM that queries your data through MCP tools, grounded by the semantic layer.
+Run any LLM that queries your data through MCP tools, grounded by the semantic layer. Powered by [LiteLLM](https://docs.litellm.ai) — supports 100+ providers with a unified interface.
 
 ```bash
-# Install Ollama — https://ollama.com
+# Local Ollama (default — no API key needed)
+# Install Ollama first: https://ollama.com
 ollama pull llama3.2
-
-# stdio (server spawned automatically — simplest)
 python ollama_client.py
+
+# OpenAI
+OPENAI_API_KEY=sk-... python ollama_client.py --model gpt-4o
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-... python ollama_client.py --model claude-3-5-sonnet-20241022
+
+# Google Gemini
+GOOGLE_API_KEY=... python ollama_client.py --model gemini/gemini-1.5-pro
+
+# Azure OpenAI
+AZURE_API_KEY=... AZURE_API_BASE=https://your-resource.openai.azure.com/ \
+  python ollama_client.py --model azure/your-deployment
+
+# Via env var (avoids repeating --model each time)
+LLM_MODEL=gpt-4o python ollama_client.py
 
 # SSE (connect to a running server)
 MCP_TRANSPORT=sse python server.py &                          # terminal 1
 python ollama_client.py --sse http://localhost:8000/sse       # terminal 2
-
-# Use a different model
-python ollama_client.py --model mistral
-OLLAMA_MODEL=llama3.2 python ollama_client.py
 ```
 
 On startup the client calls `get_semantic_context` and injects the full data model into the system prompt, so the LLM knows all table schemas, canonical metrics, and join paths before the first question.
