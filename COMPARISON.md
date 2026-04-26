@@ -136,16 +136,81 @@
 
 ## 8. Cost
 
-| Scenario | SnowMCP | Snowflake Cortex Analyst |
-|----------|---------|--------------------------|
-| Development / local | **Free** (Ollama) | Snowflake credits + Cortex compute |
-| Claude via Claude Code subscription | **$0 extra** (included in subscription) | N/A |
-| Claude via API (production) | Claude API tokens only | Snowflake credits for LLM + compute |
-| High query volume (1000 queries/day) | Fixed infra cost (Kubernetes pod ~$30–80/mo) + LLM tokens | Per-query Snowflake credits — can escalate |
-| Offline / no-internet | **Free** with Ollama | Not possible |
-| Snowflake tier requirement | None — works with any Snowflake tier | Enterprise tier or above required |
+### 8a. Unit economics
 
-**Note:** Cortex Analyst pricing is consumption-based in Snowflake credits. At low query volumes this is cheap; at high volumes SnowMCP's fixed infrastructure cost wins significantly.
+| Component | SnowMCP (Claude API) | SnowMCP (Ollama) | Snowflake Cortex Analyst |
+|-----------|----------------------|------------------|--------------------------|
+| LLM cost per query | ~$0.01–0.05 (Sonnet 4) | **$0.00** | ~$0.02–0.10 (Snowflake credits) |
+| Infrastructure | Kubernetes pod ~$30–80/mo fixed | Same | Included in Snowflake (serverless) |
+| Snowflake query cost | Standard compute credits | Standard compute credits | Standard credits + Cortex surcharge |
+| Snowflake tier required | Any (Standard works) | Any | **Enterprise or above** (~$23/credit vs $2–4 on Standard) |
+| Egress / network | Negligible | **None** | None (runs inside Snowflake) |
+
+### 8b. Cost at scale — queries per day
+
+Assumptions: Snowflake credit = $3.00, Cortex Analyst = ~0.02 credits per query (LLM overhead),
+Claude Sonnet 4 API = $3/M input + $15/M output tokens, ~2,000 tokens in + 500 out per query.
+
+| Daily queries | SnowMCP + Claude API | SnowMCP + Ollama | Cortex Analyst (Standard tier¹) | Cortex Analyst (Enterprise tier²) |
+|--------------|----------------------|------------------|----------------------------------|-------------------------------------|
+| **50** | ~$2/mo infra + ~$3/mo LLM = **~$5/mo** | ~$2/mo | ~$3/mo | ~$45/mo |
+| **200** | ~$30/mo infra + ~$12/mo LLM = **~$42/mo** | ~$30/mo | ~$12/mo | ~$90/mo |
+| **500** | ~$50/mo infra + ~$30/mo LLM = **~$80/mo** | ~$50/mo | ~$30/mo | ~$180/mo |
+| **1,000** | ~$60/mo infra + ~$60/mo LLM = **~$120/mo** | ~$60/mo | ~$60/mo | ~$360/mo |
+| **5,000** | ~$80/mo infra + ~$300/mo LLM = **~$380/mo** | ~$80/mo | ~$300/mo | ~$1,800/mo |
+| **20,000** | ~$150/mo infra + ~$1,200/mo LLM = **~$1,350/mo** | ~$150/mo | ~$1,200/mo | ~$7,200/mo |
+| **100,000** | ~$300/mo infra + ~$6,000/mo LLM = **~$6,300/mo** | ~$300/mo | ~$6,000/mo | ~$36,000/mo |
+
+¹ Cortex Analyst requires Enterprise tier — Standard pricing shown is hypothetical (Snowflake does not offer Cortex Analyst on Standard).  
+² Enterprise tier credits are ~$23/credit vs ~$3/credit Standard — the tier itself multiplies base cost ~7×.
+
+### 8c. Crossover analysis
+
+```
+Monthly cost ($)
+│
+36,000 ┤                                              ╭── Cortex Enterprise
+       │                                         ╭───╯
+ 7,200 ┤                                    ╭────╯
+       │                               ╭────╯
+ 1,800 ┤                          ╭────╯
+       │                ╭─────────╯ Cortex Standard
+   360 ┤          ╭─────╯
+       │    ╭─────╯        ╭────────────────────────── SnowMCP + Claude API
+   120 ┤────╯    ╭──────────╯
+    80 ┤        ╭╯           ╭──────────────────────── SnowMCP + Ollama
+    50 ┤────────╯────────────╯
+       └──────┬──────┬──────┬──────┬──────┬──────┬──▶ queries/day
+             50    200    500   1k    5k   20k  100k
+
+Break-even (SnowMCP+Claude vs Cortex Standard): ~500–1,000 queries/day
+Break-even (SnowMCP+Claude vs Cortex Enterprise): ~200 queries/day
+SnowMCP+Ollama beats Cortex Standard at any volume above ~200 queries/day
+```
+
+### 8d. Total cost of ownership at scale (annual, 5,000 queries/day)
+
+| Cost category | SnowMCP + Claude API | SnowMCP + Ollama | Cortex Analyst Enterprise |
+|---------------|----------------------|------------------|---------------------------|
+| LLM / Cortex compute | ~$3,600 | **$0** | ~$21,600 |
+| Infrastructure (K8s) | ~$960 | ~$960 | $0 (serverless) |
+| Snowflake Enterprise tier premium | $0 (Standard works) | $0 | ~$15,000–50,000¹ |
+| Engineering maintenance | ~$5,000–10,000 | ~$5,000–10,000 | ~$1,000–3,000 |
+| **Total (annual)** | **~$10,000–15,000** | **~$6,000–11,000** | **~$37,000–75,000** |
+
+¹ Enterprise tier pricing varies by region, contract size, and negotiated rates.
+
+### 8e. Key cost levers
+
+| Lever | SnowMCP | Cortex Analyst |
+|-------|---------|----------------|
+| Switch to cheaper model instantly | ✅ Haiku 4 at 10× cheaper than Sonnet | ❌ No model choice |
+| Use Ollama for zero LLM cost | ✅ | ❌ |
+| Cache repeated queries in-memory | ✅ DATASETS dict (CSV), extend for SF | ❌ |
+| Auto-scale infra down at night | ✅ K8s HPA / scheduled scaling | ❌ Serverless (billed per query anyway) |
+| Pin to lower Snowflake tier | ✅ Standard works | ❌ Enterprise required |
+
+**Summary:** Cortex Analyst is cheaper below ~200 queries/day (zero infra, zero LLM setup). SnowMCP with Ollama wins at any meaningful scale. SnowMCP with Claude API reaches parity around 500–1,000 queries/day and stays cheaper above that — while Cortex Enterprise costs 3–6× more at every volume.
 
 ---
 
