@@ -28,6 +28,52 @@ SERVER_SCRIPT = Path(__file__).parent / "server.py"
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
 
+def _normalize_tool_calls(msg) -> list[dict] | None:
+    """
+    Return a normalised list of {id, name, arguments(dict)} or None.
+
+    LiteLLM populates msg.tool_calls for most providers. Some Ollama models
+    instead embed the tool call as JSON text in msg.content — this fallback
+    handles that case so both paths go through the same execution loop.
+    """
+    if msg.tool_calls:
+        result = []
+        for tc in msg.tool_calls:
+            args = tc.function.arguments
+            if isinstance(args, str):
+                args = json.loads(args or "{}")
+            result.append({
+                "id": tc.id or f"call_{tc.function.name}",
+                "name": tc.function.name,
+                "arguments": args,
+            })
+        return result or None
+
+    # Fallback: tool call(s) embedded as JSON in content
+    content = (msg.content or "").strip()
+    if not (content.startswith("{") or content.startswith("[")):
+        return None
+    try:
+        parsed = json.loads(content)
+        items = parsed if isinstance(parsed, list) else [parsed]
+        if not items or "function" not in items[0]:
+            return None
+        result = []
+        for item in items:
+            fn = item["function"]
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                args = json.loads(args or "{}")
+            result.append({
+                "id": item.get("id") or f"call_{fn['name']}",
+                "name": fn["name"],
+                "arguments": args,
+            })
+        return result or None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
 def _to_litellm_tool(tool, model: str = "") -> dict:
     schema = dict(tool.inputSchema)
     if not model.startswith("gemini/"):
@@ -81,29 +127,32 @@ async def chat_loop(session: ClientSession, model: str) -> None:
                 model=model, messages=history, tools=tools
             )
             msg = response.choices[0].message
+            tool_calls = _normalize_tool_calls(msg)
 
             assistant_entry = {"role": "assistant", "content": msg.content or ""}
-            if msg.tool_calls:
+            if tool_calls:
                 assistant_entry["tool_calls"] = [
                     {
-                        "id": tc.id or f"call_{tc.function.name}_{len(history)}",
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["arguments"]),
                         },
                     }
-                    for tc in msg.tool_calls
+                    for tc in tool_calls
                 ]
+                # Don't echo the raw tool-call JSON as if it were a final answer
+                assistant_entry["content"] = ""
             history.append(assistant_entry)
 
-            if not msg.tool_calls:
+            if not tool_calls:
                 print(f"\nAssistant: {msg.content}\n")
                 break
 
-            for call in msg.tool_calls:
-                name = call.function.name
-                args = json.loads(call.function.arguments or "{}")
+            for tc in tool_calls:
+                name = tc["name"]
+                args = tc["arguments"]
                 print(f"  → {name}({json.dumps(args)})")
 
                 result = await session.call_tool(name, args)
@@ -111,7 +160,7 @@ async def chat_loop(session: ClientSession, model: str) -> None:
 
                 history.append({
                     "role": "tool",
-                    "tool_call_id": call.id or f"call_{name}_{len(history)}",
+                    "tool_call_id": tc["id"],
                     "content": content,
                 })
 
